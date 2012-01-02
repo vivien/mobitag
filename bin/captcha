@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+require 'mobitag/captcha'
+
+ARGV.empty? and raise ArgumentError, "need a captcha image to process"
+
+file = File.expand_path(ARGV.first)
+file_basename = File.basename(file.sub('.gif', ''))
+tmpdir = File.join "tmp", file_basename
+Dir.mkdir tmpdir
+
+captcha = Mobitag::Captcha.new(file)
+
+Dir.chdir tmpdir do
+  FileUtils.cp file, file_basename + "_0_original.gif"
+
+  captcha.extract_text!
+  captcha.write(file_basename + '_1_extracted.gif')
+
+  captcha.reduce_noise!
+  captcha.write(file_basename + '_2_noise_fixed.gif')
+
+  captcha.fix_line!
+  captcha.write(file_basename + '_3_line_fixed.gif')
+
+=begin
+  blocks = captcha.split
+  blocks.size == captcha.expected_noc or puts "warning: expecting #{captcha.expected_noc} chars but found #{blocks.size} blocks"
+
+  blocks.each_with_index do |block, i|
+  tmp = Magick::Image.new(captcha.width, captcha.height)
+  block.each do |p|
+  tmp.pixel_color(p.first, p.last, 'black')
+  end
+  tmp.write("#{i + 1}.gif")
+  end
+=end
+
+  captcha.label_areas # FIXME testing
+end
+
+exit
