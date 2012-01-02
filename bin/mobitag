@@ -1,0 +1,133 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'logger'
+require 'mechanize'
+require 'tempfile'
+require 'optparse'
+
+DOMAIN       = 'http://www.mobitag.nc'
+URL_LOC      = DOMAIN + '/loc' # page with the loader
+URL_NCL      = DOMAIN + '/ncl' # page with sms form
+URL_IMGALEAT = DOMAIN + '/imgaleat.php' # captcha url
+URL_TYPESMS  = DOMAIN + '/?typsms=mbgE&&lang=fr' # sent confirmation url
+URL_MBG      = DOMAIN + '/mbg' # sent error url
+
+# Mobitag form data
+$cronos_data = {
+  'imgaleat'    => nil, # captcha
+  'desti'       => nil, # recipient
+  'telexp'      => nil, # sender
+  'desti_crc'   => 0,   # recipient size
+  'telexp_crc'  => 0,   # sender size
+  'message'     => nil, # body
+  'mail_send'   => nil, # ack email address
+  'time_reinit' => " 06:00" # remaining time (useful?)
+}
+
+$logfile = nil
+
+def ask(question = nil)
+  question.nil? or print question
+  STDIN.gets.strip
+end
+
+def set_recipient(num)
+  $cronos_data['desti'] = num.to_s
+  $cronos_data['desti_crc'] = num.to_s.size
+end
+
+def set_sender(num)
+  $cronos_data['telexp'] = num.to_s
+  $cronos_data['telexp_crc'] = num.to_s.size
+end
+
+def set_message(msg)
+  $cronos_data['message'] = msg
+  $cronos_data['caracteres'] = 150 - $cronos_data['message'].size # useful?
+end
+
+def set_email(e)
+  $cronos_data['mail_send'] = e
+end
+
+def set_captcha(c)
+  $cronos_data['imgaleat'] = c
+end
+
+ARGV.options do |o|
+  o.banner =<<EOD
+Usage:
+    mobitag [options]
+EOD
+  o.on_head("Options:")
+  o.on('-t', '--to=RECIPIENT',    String, "Recipient") { |r| set_recipient(r) }
+  o.on('-f', '--from=SENDER',     String, "Sender")    { |s| set_sender(s) }
+  o.on('-m', '--message=MESSAGE', String, "Message")   { |m| set_message(m) }
+  o.on('-e', '--email=EMAIL',     String, "Ack email") { |e| set_email(e) }
+  o.on('-l', '--log=[file]',      String, "Log")       { |l| $logfile = (l.nil?) ? "mech.log" : l }
+end.parse!
+
+if $cronos_data['desti'].nil?
+  set_recipient ask("Recipient: ")
+end
+
+#if $cronos_data['telexp'].nil?
+#  set_sender ask("Sender: ")
+#end
+
+if $cronos_data['message'].nil?
+  set_message ask("Message: ")
+end
+
+agent = Mechanize.new
+agent.log = Logger.new($logfile) if $logfile
+agent.user_agent_alias = 'Mac Safari'
+
+page_home = agent.get(DOMAIN) # needed to get right PHPSESSID
+page_loc = agent.post(URL_LOC, 'Rules' => 'on', 'Submit' => 'OK') # works also with get method
+mbt_cook = /EcrireCookie\("mbt_cook", "([\w]*)/.match(page_loc.body)[1]
+
+# could be shortened some how by
+# headers['Cookie'] = headers['Cookie'] + "; mbt_cook=#{mbt_cook}"
+cookie = Mechanize::Cookie.new('mbt_cook', mbt_cook)
+cookie.domain = ".mobitag.nc"
+cookie.path = "/"
+agent.cookie_jar.add(URI.parse('http://www.mobitag.nc'), cookie)
+
+page_ncl = agent.post(URL_NCL) # needed not to get redirected to /err
+cronos = page_ncl.form_with(:name => "cronos")
+
+# Show and prompt captcha
+file_imgaleat = Tempfile.new(["mobitag_#{mbt_cook}_", ".gif"])
+agent.get(URL_IMGALEAT).save_as(file_imgaleat.path)
+system("xdg-open #{file_imgaleat.path}")
+set_captcha ask("Captcha: ")
+file_imgaleat.unlink
+
+cronos.set_fields($cronos_data)
+
+# trick from the JavaScript ControleVide() function
+cronos.method = "post"
+#cronos.target = "_self" # invalid and seems useless
+cronos.action = "/mbg"
+
+page_mbg = cronos.submit
+
+# check result
+if page_mbg.uri.to_s == URL_TYPESMS and /Votre message a bien/.match(page_mbg.body)
+  puts "SMS envoye"
+elsif page_mbg.uri.to_s == URL_MBG
+  error_code = page_mbg.search("td")[39].inner_html
+  # Error codes
+  # 011 => numero invalid
+  # 006 => bad captcha
+  captcha_good, captcha_bad = page_mbg.search("td")[43].inner_html.split('-')
+  puts "Erreur : #{error_code}"
+  puts "Captcha demande : #{captcha_good}"
+  puts "Captcha recu : #{captcha_bad}"
+else
+  raise "WTF just happened?"
+end
+
+exit
