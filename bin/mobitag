@@ -11,7 +11,7 @@ URL_LOC      = DOMAIN + '/loc' # page with the loader
 URL_NCL      = DOMAIN + '/ncl' # page with sms form
 URL_IMGALEAT = DOMAIN + '/imgaleat.php' # captcha url
 URL_TYPESMS  = DOMAIN + '/?typsms=mbgE&&lang=fr' # sent confirmation url
-URL_MBG      = DOMAIN + '/mbg' # sent error url
+URL_MBG      = DOMAIN + '/ern' # sent error url
 
 # Mobitag form data
 $cronos_data = {
@@ -110,7 +110,7 @@ cronos.set_fields($cronos_data)
 # trick from the JavaScript ControleVide() function
 cronos.method = "post"
 #cronos.target = "_self" # invalid and seems useless
-cronos.action = "/mbg"
+cronos.action = "/mbe"
 
 page_mbg = cronos.submit
 
